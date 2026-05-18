@@ -1,4 +1,7 @@
 """
+
+https://kids.strw.leidenuniv.nl/overview.php
+
 https://cds-astro.github.io/tutorials/1_Intro_to_CDS_services_in_notebooks.html
 
 https://astroquery.readthedocs.io/en/latest/api/astroquery.xmatch.XMatchClass.html
@@ -32,18 +35,21 @@ from astropy.table import Table
 from astroquery.simbad import Simbad
 from astroquery.vizier import Vizier
 from astroquery.xmatch import XMatch
+from astroquery.utils.tap.core import TapPlus
 
 import pyvo
-from astroquery.utils.tap.core import TapPlus
 
 import fitsio
 from fitsio import FITS,FITSHDR
+
+
 
 DEBUG = False
 if DEBUG:
     help(XMatch)
 
-"""
+""" Example code
+
 get_available_tables(self, *, cache=True)
 
 query(self, cat1, cat2, max_distance, *,
@@ -56,11 +62,98 @@ cache=True, get_query_payload=False, **kwargs)
 
 """
 
-def try_logger():
-    """ check is a logger exists
+
+import logging
+
+
+import logging
+import sys
+
+
+import logging
+import sys
+
+
+import logging
+import sys
+
+
+def get_logger(name=__name__, level=logging.INFO, test=False):
+    """Return a module-level logger, adding a StreamHandler if none exists.
+
+    Parameters
+    ----------
+    name : str, optional
+        Logger name. Defaults to the module name.
+    level : int, optional
+        Logging level. Defaults to logging.INFO.
+    test : bool, optional
+        If True, run self-test assertions and demo messages.
+        Defaults to False.
+
+    Returns
+    -------
+    logging.Logger
+        Configured logger instance.
+    """
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setFormatter(logging.Formatter(
+            fmt='%(asctime)s.%(msecs)03d %(name)-12s %(module)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
+            datefmt='%y-%m-%dT%H:%M:%S'
+        ))
+        logger.addHandler(handler)
+        logger.setLevel(level)
+        logger.info(f'Logger created: {name}')
+
+    if test:
+        logger.debug(f'DEBUG message (should not appear at INFO level)')
+        logger.info(f'INFO message')
+        logger.warning(f'WARNING message')
+
+        logger2 = logging.getLogger(name)
+        assert logger is logger2, 'get_logger is not idempotent'
+        assert len(logger.handlers) == 1, (
+            f'Expected 1 handler, found {len(logger.handlers)}'
+        )
+        assert logger.level == level, (
+            f'Expected level {level}, got {logger.level}'
+        )
+
+        logger.info(f'All tests passed')
+
+        if sys.stdin.isatty():
+            input('Enter any key to continue... ')
+
+    return logger
+
+
+def try_logger(test=False):
+    """ check if a logger exists
 
     """
     import logging
+
+    try:
+        logger
+    except NameError:
+        logger = logging.getLogger(__name__)
+        if not logger.handlers:
+            # logger.addHandler(logging.StreamHandler())
+            logger.setLevel(logging.INFO)
+        logger.info('Create logger')
+
+    if test:
+        logger.info('')
+
+    return logger
+
+
+def try_logger_v2():
+    """Check if a logger exists."""
+    import logging
+
     try:
         logger
     except NameError:
@@ -68,14 +161,205 @@ def try_logger():
         if not logger.handlers:
             logger.addHandler(logging.StreamHandler())
             logger.setLevel(logging.INFO)
+            logger.propagate = False  # Prevent duplicate messages
+        logger.info('Create logger')
+
+    return logger
+
+
+def tap_get_radec_limits(tap_service_name=None,
+                         tap_table=None,
+                         colnames_radec=['RAJ2000', 'DEJ2000']):
+    """Get the TAP RADec limits using a brute force
+
+    https://dp0-2.lsst.io/data-access-analysis-tools/adql-recipes.html
+
+    See: https://kids.strw.leidenuniv.nl/overview.php
+
+    this is quite clumsy but just needs to run once and the results saved
+    Each TAP query took three minutes!
+
+    see: https://www.ivoa.net/documents/ADQL/20180112/PR-ADQL-2.1-20180112.html
+
+    https://zenodo.org/records/14226117
+
+    DR5 [all]
+    RA range: 0.0 to 360.0
+    DEC range: -35.609927 3.961583
+
+
+    N:
+    RA range:
+    Dec range: -35.609927 -25.719758
+
+    S:
+    RA range:
+    Dec range: -35.609927 -25.719758
+
+    """
+
+    t0 = time.time()
+
+    tap_service_name = "http://tapvizier.cds.unistra.fr/TAPVizieR/tap"
+    # Connect to VizieR TAP service
+    print(f'pyvo.dal.TAPService')
+    tap = pyvo.dal.TAPService(tap_service_name)
+
+    # All
+    query0 = f"""
+    SELECT
+    -- KIDS All
+        MIN(RAJ2000), MAX(RAJ2000),
+        MIN(DEJ2000), MAX(DEJ2000)
+    FROM \"{tap_table}\"
+    WHERE (DEJ2000 >= -40.0) AND (DEJ2000 <= 5.0)
+    """
+    # Result
+    #   RA Range: 0.0 360.0
+    #   Dec range: -35.609927 3.961583
+
+
+    # KIDS-N All
+    query1 = f"""
+    SELECT
+    -- KIDS-N All
+        MIN(RAJ2000), MAX(RAJ2000),
+        MIN(DEJ2000), MAX(DEJ2000)
+    FROM \"{tap_table}\"
+    WHERE (DEJ2000 >= -10.0) AND (DEJ2000 <= 5.0)
+    """
+    # Result:
+    # RA Range: 128.489853 238.510189
+    # Dec range: -3.961563 3.961583
+
+
+    # WAVES region
+    # KiDS-N-W2 128.5 to 141.5 -2.0 to +3.0
+    query2 = f"""
+    SELECT
+    -- KiDS-N-W2 WAVES
+        MIN(RAJ2000), MAX(RAJ2000),
+        MIN(DEJ2000), MAX(DEJ2000)
+    FROM \"{tap_table}\"
+    WHERE (RAJ2000 >= 120.0) AND (RAJ2000 <= 143.0) AND
+          (DEJ2000 >= -10.0) AND (DEJ2000 <= 5.0)
+    """
+    # Result:
+    # RA range: 128.489853 141.903234
+    # Dec range: -1.983534 2.97255
+
+
+    # KIDS-N-D2: COSMOS region
+    # KiDS-N-D2	149.6 to 151.6	1.7 to 2.7
+    query3 = f"""
+    SELECT
+    -- KIDS-N-D2: COSMOS region
+        MIN(RAJ2000), MAX(RAJ2000),
+        MIN(DEJ2000), MAX(DEJ2000)
+    FROM \"{tap_table}\"
+    WHERE (RAJ2000 >= 149.0) AND (RAJ2000 <= 152.0) AND
+          (DEJ2000 >= -10.0) AND (DEJ2000 <= 5.0)
+    """
+    # Result:
+    # RA Range: 149.572644 150.593402
+    # Dec Range: 1.71137 2.700334
+
+
+    # KIDS-N-D2: COSMOS region
+    # KiDS-N-D2	149.6 to 151.6	1.7 to 2.7
+    query4 = f"""
+    SELECT
+    -- KIDS-N:
+        MIN(RAJ2000), MAX(RAJ2000),
+        MIN(DEJ2000), MAX(DEJ2000)
+    FROM \"{tap_table}\"
+    WHERE (RAJ2000 >= 152.0) AND (RAJ2000 <= 240.0) AND
+          (DEJ2000 >= -10.0) AND (DEJ2000 <= 5.0)
+    """
+    # Result:
+    # RA Range:
+    # Dec Range:
+
+
+    # Southern region
+    query5 = f"""
+    SELECT
+    -- KIDS-S All
+        MIN(RAJ2000), MAX(RAJ2000),
+        MIN(DEJ2000), MAX(DEJ2000)
+    FROM \"{tap_table}\"
+    WHERE (DEJ2000 <= -20.0) AND (DEJ2000 >= -40.0)
+    """
+    # Result:
+    # Ra range: 0.0 360
+    # Dec range: -35.609927 -25.719758
+
+
+    #
+    query6 = f"""
+    SELECT
+    -- KIDS-S > 12hrs
+        MIN(RAJ2000), MAX(RAJ2000),
+        MIN(DEJ2000), MAX(DEJ2000)
+    FROM \"{tap_table}\"
+    WHERE (DEJ2000 <= -15.0) AND (RAJ2000 >= 180.0)
+    """
+    # Result: S RA range 328.809452 to 360.0000
+
+    query7 = f"""
+    SELECT
+    -- KIDS-S < 12hrs
+        MIN(RAJ2000), MAX(RAJ2000),
+        MIN(DEJ2000), MAX(DEJ2000)
+    FROM \"{tap_table}\"
+    WHERE (DEJ2000 <= -15.0) AND (RAJ2000 <= 180.0)
+    """
+    # Result: S RA range 0 to 54.136983
+
+    # Superset:
+    # N:
+    # RA range: 128.0 to 239.0
+    # Dec raage:
+
+    query8 = f"""
+    -- RA range timing test
+    SELECT
+        MIN(RAJ2000), MAX(RAJ2000)
+    FROM \"{tap_table}\"
+    """
+
+    # indexing timing test
+    query9 = f"""
+    SELECT
+    -- Dec range timing test
+        MIN(DEJ2000), MAX(DEJ2000)
+    FROM \"{tap_table}\"
+    """
+    # Result:
+    # N:
+    # RA range: 128.0 to 239.0
+    # Dec rnage:
+
+
+    querylist = [query0, query1, query2, query3,
+                 query4, query5, query6, query7,
+                 query8, query9]
+
+    istart = 3
+    iend = 7
+    nquerys = len(querylist)
+    for iquery, query in enumerate(querylist[istart:iend+1]):
+
+        print(f'query{iquery+istart}: {query}')
+        result = tap.search(query)
+        print(f'result: {result}')
+
+        print('Elapsed time:', time.time() - t0, 'seconds')
+
     return
 
 
-def get_patch_limits_kids():
 
-    dec_limits = [-40.0, 10.0]
-
-    return
 
 
 def tap_count_rows(table=None,
@@ -93,6 +377,7 @@ def tap_count_rows(table=None,
     print(f'tap_count_rows')
 
     t0 = time.time()
+
     # Connect to VizieR TAP service
     print(f'pyvo.dal.TAPService')
     tap = pyvo.dal.TAPService("http://tapvizier.cds.unistra.fr/TAPVizieR/tap")
@@ -131,8 +416,9 @@ def tap_count_rows(table=None,
         print(f'query: {query}')
         result = tap.launch_job(query).get_results()
         print(table, result)
-        print('Elapsed time:', time.time() - t0, 'seconds')
         print('Elapsed time:', time.time() - t1, 'seconds')
+        print('Total Elapsed time:', time.time() - t0, 'seconds')
+
 
 
         if GET_RADEC_LIMITS:
@@ -157,20 +443,30 @@ def tap_count_rows(table=None,
     return
 
 
+def mk_url_vizier_catalog(catalog=None):
+    """
+    e.g. catalog = 'IX/70'
+
+    """
+
+    url_base = 'https://vizier.cds.unistra.fr/viz-bin/VizieR'
+
+    if catalog is not None:
+        url = url_base + '?-source=' + catalog
+
+    if catalog is None:
+        url = url_base
+
+    return url
+
+
 def cds_vizier_xmatch(table1=None,
                       table2=None,
                       colname_xmatch_separation = 'angDist',
-                      max_distance=4.0,):
+                      max_distance=4.0,
+                      test=False):
 
-    import logging
-    try:
-        logger
-    except NameError:
-        logger = logging.getLogger(__name__)
-        if not logger.handlers:
-            logger.addHandler(logging.StreamHandler())
-            logger.setLevel(logging.INFO)
-    logger.info('\n')
+    try_logger()
 
     t0 = time.time()
 
@@ -185,6 +481,10 @@ def cds_vizier_xmatch(table1=None,
     print(f'cat1: {cat1}')
     print(f'cat2: {cat2}')
     print(f'Maximum xmatch distance: {max_distance}')
+
+    if test:
+        table_xmatch = XMatch.query(cat1, cat2, max_distance)
+
     table_xmatch = XMatch.query(cat1, cat2, max_distance)
     print('Elapsed time:', time.time() - t0, 'seconds')
 
@@ -240,7 +540,9 @@ def cds_vizier_xmatch_tap(table1_name=None,
                           xmatch_table_stats=True,
                           outfile_xmatch='cds_vizier_xmatch.fits',
                           outfile_xmatch_suffix=None,
-                          add_nrows=True):
+                          add_nrows=True,
+                          debug=False,
+                          verbose=False):
     """
 
 
@@ -255,14 +557,15 @@ def cds_vizier_xmatch_tap(table1_name=None,
     from astroquery.utils.tap.core import TapPlus
 
     try_logger()
-
     logger.info('\n')
     t0 = time.time()
 
     # Connect to CDS VizieR TAP service
     service = pyvo.dal.TAPService(
         "http://tapvizier.u-strasbg.fr/TAPVizieR/tap")
-    service.describe()
+    if verbose:
+        service.describe()
+        logger.info('\n')
 
     #result = service.search("""SELECT table_name, description
     #    FROM TAP_SCHEMA.tables
@@ -309,8 +612,9 @@ def cds_vizier_xmatch_tap(table1_name=None,
 
     print(f'table1_name: {table1_name}')
     print(f'Number of columns: {ncolumns1}')
-    print('table1_info.to_table().colnames')
-    print(table1_info.colnames)
+    if verbose:
+        print('table1_info.to_table().colnames')
+        print(table1_info.colnames)
 
 
     if table2_name is None:
@@ -333,8 +637,9 @@ def cds_vizier_xmatch_tap(table1_name=None,
     table2_info = table2_info.to_table()
     ncolumns2 = len(table2_info.colnames)
     print(f'Number of columns: {ncolumns2}')
-    print('table2_info.to_table().colnames')
-    print(table2_info.colnames)
+    if verbose:
+        print('table2_info.to_table().colnames')
+        print(table2_info.colnames)
 
     if get_only_metadata:
         return
@@ -459,20 +764,81 @@ def cds_vizier_xmatch_tap(table1_name=None,
 
     if async_tap:
 
+        t0_tap = time.time()
         #job = service.run_async(adql_}query)
         job = service.submit_job(adql_query)
-        print(f'Job submitted: {job.url}')
-        print(f'Job phase: {job.phase}')
+        logger.info(f'Async TAP job submitted: {job.url}')
+        logger.info(f'Async TAP job phase: {job.phase}')
         job.run()
 
         # Wait for completion (polls automatically)
         job.wait()
-        print(f'Job finished, phase: {job.phase}')
+        logger.info(f'Async TAP Job finished; phase: {job.phase}')
+        logger.info(f'Job elapsed time: {time.time() - t0_tap} seconds')
         print('Elapsed time:', time.time() - t0, 'seconds')
+
+        explore_result = False
+        if explore_result:
+        # help(job)
+            # Check result size
+            # print(f"Result size: {job.result_size}")  # bytes, if available
+            # Get just the column info without downloading all data
+            logger.info(f"Result URI: {job.result_uri}")
+
+            import requests
+
+            response = requests.get(job.url)
+            print(f'job.url: {response.text}')
+
+            # Stream just the first part to get column definitions
+            response = requests.get(job.result_uri, stream=True)
+            header_chunk = b''
+            for chunk in response.iter_content(chunk_size=4096):
+                header_chunk += chunk
+                if b'<TABLEDATA>' in header_chunk or b'<BINARY>' in header_chunk:
+                    break
+                if len(header_chunk) > 50000:  # Safety limit
+                    break
+            response.close()
+
+            # Parse just the header
+            header_text = header_chunk.decode('utf-8', errors='ignore')
+
+            # Find column definitions
+            import re
+            fields = re.findall(r'<FIELD[^>]*name="([^"]*)"[^>]*datatype="([^"]*)"', header_text)
+            print(f"Columns ({len(fields)}):")
+            for name, dtype in fields:
+                print(f"  {name}: {dtype}")
+
+            logger.info(f'Job elapsed time: {time.time() - t0_tap} seconds')
+            response = requests.head(job.result_uri)
+            print(f"Content-Length: {response.headers.get('Content-Length')} bytes")
+            print(f"Content-Type: {response.headers.get('Content-Type')}")
+            logger.info(f'Job elapsed time: {time.time() - t0_tap} seconds')
+
+            import requests
+
+            headers = {'Range': 'bytes=0-50000'}
+            response = requests.get(job.result_uri, headers=headers)
+            header_text = response.text
+
+            logger.info(f'Job elapsed time: {time.time() - t0_tap} seconds')
+            input('Enter any key to continue... ')
+
+            print('header_text[:5000]')
+            #print(header_text[:20000])  # Inspect the structure
+            help(header_text)
+            print(len(header_text))
+            logger.info('')
+            input('Enter any key to continue... ')
+
+            print(header_text)  # Inspect the structure
 
         # Get results
         logger.info(f'Fetch results')
         results = job.fetch_result()
+        print(f"Results size: {sys.getsizeof(results)} bytes")
 
 
     if not async_tap:
@@ -483,7 +849,9 @@ def cds_vizier_xmatch_tap(table1_name=None,
     print('Elapsed time:', time.time() - t0, 'seconds')
     nrows = len(results)
     print(f'Query finished {nrows} rows')
-    input('Enter any key to continue... ')
+    if debug:
+        logger.info('')
+        input('Enter any key to continue... ')
 
 
     # Convert to astropy table
@@ -495,16 +863,19 @@ def cds_vizier_xmatch_tap(table1_name=None,
     #table.write('milliquas_kids_crossmatch.vot', format='votable',
     #            overwrite=True)
 
-    table.info()
+    if verbose:
+        table.info()
+
     RUN_table_info_stats = False
     if RUN_table_info_stats:
         table.info(['attributes', 'stats'])
         table.info()
 
-    print("\ncolumn dtypes:")
-    print(table.dtype)
-    logger.info('')
+    if verbose:
+        print("\ncolumn dtypes:")
+        print(table.dtype)
 
+    logger.info('')
 
     # Find all object/string columns
     object_columns = [col for col in table.colnames if table[col].dtype == 'object']
@@ -525,11 +896,14 @@ def cds_vizier_xmatch_tap(table1_name=None,
         else:
             print(f"{col}: all values are None/null")
 
-    print("\nUpdated dtypes:")
-    print(table.dtype)
+    if verbose:
+        print("\nUpdated dtypes:")
+        print(table.dtype)
 
-    table.info()
-    input('Enter any key to continue... ')
+    if verbose:
+        table.info()
+        logger.info('')
+        input('Enter any key to continue... ')
 
     if xmatch_table_stats:
         table.info(['attributes', 'stats'])
@@ -539,13 +913,16 @@ def cds_vizier_xmatch_tap(table1_name=None,
 
     # Display results
     print(f"\nFound {len(table)} matches within {max_distance} arcseconds")
-    table.pprint(max_lines=20, max_width=120)
-    table.info()
+    if verbose:
+        table.pprint(max_lines=20, max_width=120)
+        table.info()
 
     table_fix_column_units(table=table)
 
     # Optionally save to file
-    print(f'outfile_xmatch template: {outfile_xmatch}')
+    #filename_add_nrows = True
+    #if filename_add_nrows:
+
     path = Path(outfile_xmatch)
     if outfile_xmatch_suffix is  None:
         outfile = f"{path.stem}_{nrows}{path.suffix}"
@@ -558,12 +935,14 @@ def cds_vizier_xmatch_tap(table1_name=None,
     # 2026-02-28 13:45:00.1 UTC
     print(now.strftime("%Y-%m-%d %H:%M:%S.%f")[:-5] + " UTC")
     print(f'Elapsed time: {(time.time() - t0):.3f} seconds; {now.strftime("%Y-%m-%d %H:%M:%S.%f")} UTC')
+
     t1 = time.time()
+    logger.info(f'Writing {outfile}')
     table.write(outfile, overwrite=True)
-    print()
-    print(f'{outfile} written successfully')
+    logger.info(f'{outfile} written successfully')
     print('Table write elapsed time:', time.time() - t1, 'seconds')
     print('Total elapsed time:', time.time() - t0, 'seconds')
+
     print()
     print(f'table1_name: {table1_name}')
     print(f'table2_name: {table2_name}')
@@ -595,7 +974,15 @@ def cds_vizier_xmatch_tap(table1_name=None,
 
     logger.info('')
 
+    test_source_radec1 = table[table1_colnames_radec][0]
+    test_source_radec2 = table[table2_colnames_radec][0]
+    print(f'test_source_radec1: {test_source_radec1}')
+    print(f'test_source_radec2: {test_source_radec2}')
 
+    table1_test = tap_table_check(table=None, radec=None)
+    table2_test = tap_table_check(table=None, radec=None)
+
+    logger.info('')
     input('Enter any key to continue... ')
 
     print(f'table: {len(table)}')
@@ -675,6 +1062,181 @@ def cds_vizier_xmatch_tap(table1_name=None,
     return table
 
 
+def tap_table_check(catalog="VII/289",
+                    table="VII/289/dr16q",
+                    table_colnames_radec=['RAJ2000', 'DEJ2000'],
+                    radec_centre=[180.0, -60.0],
+                    box_width_deg=(1.0/60),
+                    test=False,
+                    verbose=False):
+    """
+    exmaple:
+
+    table_test = tap_table_check(table=table1_name,
+                                 table_colnames_radec=table1_colnames_radec,
+                                 radec_centre=[180.0, -60.0])
+
+
+    See `the vizier constraints page
+ |      https://vizier.cds.unistra.fr/vizier/vizHelp/syntax.htx  for details.
+
+    """
+    import sys
+    import time
+    from astroquery.vizier import Vizier
+    help(Vizier)
+
+    t0 = time.time()
+
+    logger = try_logger()
+    logger.info('')
+
+    metadata = Vizier(catalog=catalog).get_catalog_metadata()
+    print(type(metadata))
+    print(len(metadata))
+    print()
+    print(metadata)
+
+    print()
+
+
+    # Vizier interface
+
+    test = True
+    if test:
+
+        print('See https://vizier.cds.unistra.fr/vizier/vizHelp/syntax.htx')
+        # need to be careful about spherical distortions
+        radec_centre = [180.0, 0.0]
+        box_width_deg = (0.5)
+
+        dec_min = radec_centre[1] - (box_width_deg/2.0)
+        dec_max = radec_centre[1] + (box_width_deg/2.0)
+
+        dec_abs_max = max(abs(dec_min), abs(dec_max))
+        print(dec_abs_max, np.deg2rad(dec_abs_max))
+        cosdec = np.cos(np.deg2rad(dec_abs_max))
+
+        print(f'dec_abs_dec, cosdec, 1/cosdec: '
+              f'{dec_abs_max}, {cosdec}, {1.0/cosdec}')
+
+        ra_min_deg = radec_centre[0] - (box_width_deg/(2.0*cosdec))
+        ra_max_deg = radec_centre[0] + (box_width_deg/(2.0*cosdec))
+
+        dec_min_deg = radec_centre[1] - (box_width_deg/(2.0))
+        dec_max_deg = radec_centre[1] + (box_width_deg/(2.0))
+
+        print(f'RA limits: {ra_min_deg}, {ra_max_deg}')
+        print(f'Dec limits: {dec_min_deg}, {dec_max_deg}')
+
+        # sys.exit()
+
+        # RAJ2000=">=179.9 & <=180.1"
+        RAJ2000_Constraint = f'>= {ra_min_deg} & <= {ra_max_deg}'
+        # RAJ2000_Constraint = ">= 179.9 & <= 180.1"
+
+        #DEJ2000=">=-0.1 & <= 0.1",
+        DEJ2000_Constraint = f'>= {dec_min_deg} & <= {dec_max_deg}'
+        # DEJ2000_Constraint = ">= -0.1 & <= 0.1"
+
+        print(f'RAJ2000_Constraint: {RAJ2000_Constraint} '
+              f'{type(RAJ2000_Constraint)} '
+              f'{len(RAJ2000_Constraint)}')
+        print(f'DEJ2000_Constraint: {DEJ2000_Constraint} '
+              f'{type(DEJ2000_Constraint)} '
+              f'{len(DEJ2000_Constraint)}')
+
+        vizier = Vizier(row_limit=99)
+        vizier = Vizier(columns=["**"])
+        # Just fetch one row to inspect the table structure
+        catalog = "VII/289"
+        table = "VII/289/dr16q"
+        result_vizier = vizier.query_constraints(
+            catalog=table,
+            RAJ2000=RAJ2000_Constraint,
+            #RAJ2000=">=179.9 & <= 180.1",
+            DEJ2000=DEJ2000_Constraint,
+            #DEJ2000=">=-0.1 & <= 0.1",
+            row_limit=99)
+
+        # sys.exit()
+
+    # return a Table list for the catalog which is confusing;
+    # row limit applies to the list of tables!
+    logger.info('')
+    print(f'Result type {type(result_vizier)}')
+    print('Elapsed time:', time.time() - t0, 'seconds')
+
+    print(f'len(result_vizier): {len(result_vizier)}')
+
+    if len(result_vizier) > 1:
+        logger.info('To many tables returned; exiting...')
+        sys.exit()
+
+    if len(result_vizier) == 1:
+        result_vizier = result_vizier[0]
+    logger.info('')
+    print(result_vizier.colnames)
+    print(f'Number of columns: {len(result_vizier.colnames)}')
+    logger.info('')
+
+    result_vizier.info('attributes')
+    logger.info('')
+    result_vizier.info('stats')
+
+    logger.info('')
+    print(f'Number of rows: {len(result_vizier)}')
+    print(f'Number of columns: {len(result_vizier.colnames)}')
+    print(result_vizier.colnames)
+    logger.info('')
+    input('Enter any key to continue... ')
+
+    t0 = time.time()
+    # Connect to VizieR TAP service
+    print(f'Use pyvo.dal.TAPService')
+    tap_service = \
+        pyvo.dal.TAPService("http://tapvizier.cds.unistra.fr/TAPVizieR/tap")
+
+    #tap_service.describe()
+
+    # note the extra exclosing quotes needed; thank you Claude for helping me.
+    # CDS currently does not support nrows info
+    """
+    table_info = tap.tables[f'"{table}"']
+    print(f"{table}: {table_info.nrows} rows")
+    """
+
+    query = f"SELECT TOP 1 * FROM \"{table}\""
+    print(f'query:\ {query}')
+    tap_result = tap_service.search(query)
+    print('table_result.to_table().colnames')
+    print(tap_result.to_table().colnames)
+    print(f'Number of columns: {len(tap_result.to_table().colnames)}')
+    logger.info('')
+
+    query = f"""
+        SELECT *
+        FROM \"{table}\"
+        WHERE
+            {table_colnames_radec[0]} >= {ra_min_deg} AND
+            {table_colnames_radec[0]} <= {ra_max_deg} AND
+            {table_colnames_radec[1]} >= {dec_min_deg} AND
+            {table_colnames_radec[1]} <= {dec_max_deg}
+        """
+    print(f'query:\ {query}')
+    result = tap_service.search(query)
+
+    print(f'type(result): {type(result)}')
+    print(f'Number of rows: {len(result)}')
+    print('result.to_table().colnames')
+    print(result.to_table().colnames)
+    print(f'Number of columns: {len(result.to_table().colnames)}')
+    logger.info('')
+    print('Elapsed time:', time.time() - t0, 'seconds')
+
+    return result
+
+
 def fix_votable_object(table, dtype_new='bool',
                        verbose=False):
     """
@@ -736,7 +1298,6 @@ def count_rows_table(table=None, GET_COLNAMES=True):
     print('Elapsed time:', time.time() - t1, 'seconds')
 
 
-
     return
 
 
@@ -782,7 +1343,8 @@ def get_table_lists(DEBUG=False):
                        'II/383/kids_dr5',   # 9 kids_dr5
                        'IX/71/xmmsl3c',
                        'V/161/zcatdr1', #11
-                       'I/359/vhs_dr4'] # 12 VHS dR4
+                       'I/359/vhs_dr4', # 12 VHS dR4
+                       'I/355/gaiadr3'] # 13 Gaia DR3
 
     table_count_rows = [1021800, # 0
                         407806,  # 1
@@ -796,7 +1358,8 @@ def get_table_lists(DEBUG=False):
                         138812117, # 9
                         -99,# 10
                         -99,# 11
-                        -99]# 12
+                        -99, # 12
+                        -99] # 13
 
     table_count_columns = [17, # 0
                         486, # 1
@@ -810,7 +1373,8 @@ def get_table_lists(DEBUG=False):
                         -99, # 9
                         -99, # 10
                         -99, # 11
-                        -99] # 12
+                        -99, # 12
+                        -99] # 13
 
     # Vizier catalog name; could be derived from the table name
     table_catalog_list =['VII/294', # 0
@@ -825,7 +1389,9 @@ def get_table_lists(DEBUG=False):
                          'II/383',   # 9
                          'IX/71', # 10
                          'V/161', #11
-                         'I/359'] # 12
+                         'I/359', # 12
+                         'I/355'] # 13
+
 
 
     table_label_list = ['MQv8_Flesch+2023',
@@ -840,7 +1406,8 @@ def get_table_lists(DEBUG=False):
                         'kids_dr5_Wright+2024',
                         'XMMSL3_XMM-SSC+2025',
                         'DESI_DR1_zcat+2025', #11
-                        'VHS_DR4+2019'] # 12 VHS dR4
+                        'VHS_DR4+2019', # 12 VHS dR4
+                        'gaiadr3'] # 13
 
 
 
@@ -855,8 +1422,10 @@ def get_table_lists(DEBUG=False):
                             ['RA_ICRS', 'DE_ICRS'], # 8
                             ['RAJ2000', 'DEJ2000'],
                             ['RAJ2000', 'DEJ2000'], # 10
-                            ['RAICRS', 'DEICRS'],
-                            ['RAJ2000', 'DEJ2000']]
+                            ['RAICRS', 'DEICRS'], # 11
+                            ['RAJ2000', 'DEJ2000'], #12
+                            ['RAJ2000', 'DEJ2000']] # 13
+
 
     table_metadata = [table_count_rows, table_count_columns]
 
@@ -1048,14 +1617,37 @@ def parse_arguments():
         help="Use Vizier TAP async service (default: %(default)s)",
     )
 
-
-
     parser.add_argument(
         "--xmatch_cds",
         action="store_true",
         default=False,
         help="Use Vizier xmatch service (default: %(default)s)",
     )
+
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="Debug option (default: %(default)s)",
+    )
+
+
+    parser.add_argument(
+        "--stage_debug",
+        action="store_true",
+        default=False,
+        help="Stage debug option (default: %(default)s)",
+    )
+
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Verbose option (default: %(default)s)",
+    )
+
+
 
     parser.add_argument(
         "--pause",
@@ -1068,23 +1660,24 @@ def parse_arguments():
     return parser.parse_args()
 
 
+
+
 def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
     """
 
 
     """
+
+
     from datetime import datetime, timezone
+    import sys
 
+    logger = get_logger()
 
-    try:
-        logger
-    except NameError:
-        logger = logging.getLogger(__name__)
-        if not logger.handlers:
-            logger.addHandler(logging.StreamHandler())
-            logger.setLevel(logging.INFO)
-
-    logger.info('\n')
+    logger.info('')
+    logger.info(f"Command: {' '.join(sys.argv)}")
+    logger.info(f"Script: {sys.argv[0]}")
+    logger.info(f"Arguments: {sys.argv[1:]}")
 
     t0 = time.time()
 
@@ -1105,8 +1698,8 @@ def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
         print(f'CLI arg: {name} = {value}')
     print()
 
+    debug = args.debug
     xmatch_cds = args.xmatch_cds
-
     async_tap = args.async_tap
 
     max_distance = args.max_distance
@@ -1115,6 +1708,8 @@ def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
     offset_ra = args.offset_distance
     print(f'offset_ra: {offset_ra}')
 
+    offset_dec = args.offset_distance
+    print(f'offset_dec: {offset_dec}')
 
     itable1 = getattr(args, 'itable1')
     print(f'itable1: {itable1}')
@@ -1122,14 +1717,18 @@ def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
     itable2 = getattr(args, 'itable2')
     print(f'itable2: {itable2}')
 
-    GET_METADATA = args.get_metadata
+    debug = args.debug
+    pause = args.pause
+    verbose = args.verbose
 
+    GET_METADATA = args.get_metadata
     LIST_TABLES = getattr(args, 'list_tables')
 
     print(f'LIST_TABLES: {LIST_TABLES}')
     if LIST_TABLES:
         set_xmatch_input_tables(LIST_TABLES_ONLY=LIST_TABLES)
         sys.exit()
+
 
     COUNT_ROWS_TABLES= getattr(args, 'count_rows_tables')
     if COUNT_ROWS_TABLES:
@@ -1175,9 +1774,6 @@ def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
         logger.info('')
         input('Enter any key to continue... ')
 
-
-
-
     #help(table_list)
     #print(table_list)
 
@@ -1197,8 +1793,14 @@ def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
 
     print(f'itable1: {itable1}')
     print(f'itable2: {itable2}')
-    table_names, table_catalogs, table_labels, tables_colnames_radec, table_metadata = \
+    table_names, table_catalogs, table_labels, tables_colnames_radec, \
+        table_metadata = \
         set_xmatch_input_tables(itable1=itable1, itable2=itable2)
+
+    catalog1_url = mk_url_vizier_catalog(catalog=table_catalogs[0])
+    logger.info(f'catalog1 url: {catalog1_url}')
+    catalog2_url = mk_url_vizier_catalog(catalog=table_catalogs[1])
+    logger.info(f'catalog2 url: {catalog2_url}')
 
     #table_count
 
@@ -1216,6 +1818,42 @@ def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
 
     table1_colnames_radec = tables_colnames_radec[0]
     table2_colnames_radec = tables_colnames_radec[1]
+
+    logger.info('')
+    DO_TABLE_CHECK = False
+    if DO_TABLE_CHECK:
+        table_test = tap_table_check(
+            table=table1_name,
+            table_colnames_radec=table1_colnames_radec,
+            radec_centre=[180.0, 0.0])
+
+        input('Enter any key to continue... ')
+        sys.exit()
+
+
+    if debug or verbose:
+        catalog1_ivoid = f"ivo://CDS.VizieR/{table1_catalog}"
+        voresource1 = pyvo.registry.search(ivoid=catalog1_ivoid)[0]
+        voresource1.describe(verbose=True)
+        tables = voresource1.get_tables()
+        print(f"In this catalogue, we have {len(tables)} tables.")
+        for table_name, table in tables.items():
+            print(f"{table_name}: {table.description}")
+
+        logger.info('')
+        catalog2_ivoid = f"ivo://CDS.VizieR/{table2_catalog}"
+        voresource2 = pyvo.registry.search(ivoid=catalog2_ivoid)[0]
+        voresource2.describe(verbose=True)
+        tables = voresource2.get_tables()
+        print(f"In this catalogue, we have {len(tables)} tables.")
+        for table_name, table in tables.items():
+            print(f"{table_name}: {table.description}")
+        logger.info('')
+
+    if verbose:
+        logger.info('')
+        input('Enter any key to continue... ')
+
 
     if xmatch_cds:
         colname_xmatch_separation = 'angDist'
@@ -1255,7 +1893,8 @@ def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
                               table1_catalog=table1_catalog,
                               table2_name=table2_name,
                               table2_catalog=table2_catalog,
-                              get_only_metadata=True)
+                              get_only_metadata=True,
+                              debug=debug)
 
         sys.exit()
 
@@ -1289,7 +1928,8 @@ def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
                           offset_dec=0.0,
                           outfile_xmatch=outfile_xmatch,
                           outfile_xmatch_suffix=outfile_xmatch_suffix,
-                          get_only_metadata=False)
+                          get_only_metadata=False,
+                          debug=debug)
 
     logger.info('')
     sys.exit()
@@ -1366,7 +2006,33 @@ def main(DEBUG=False, tap_catalog=None, RUN_COUNT_ROWS=False):
     return
 
 
+
 if __name__ == "__main__":
+
+    import fits_sql_history
+    #help(fits_sql_history)
+
+    # test
+    TEST = True
+    if TEST:
+        tap_get_radec_limits(tap_service_name=None,
+                             tap_table='II/383/kids_dr5',
+                             colnames_radec=['RAJ2000', 'DEJ2000'])
+
+        sys.exit()
+
+
+        logger = get_logger(test=False)
+
+        tap_table_check(catalog="VII/289",
+                        table="VII/289/dr16q",
+                        table_colnames_radec=['RAJ2000', 'DEJ2000'],
+                        radec_centre=[180.0, 0.0],
+                        box_width_deg=0.1,
+                        test=True,
+                        verbose=True)
+
+        sys.exit()
 
     timestamp = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime())
     filename_timestamp = time.strftime('%Y%m%dT%H%M', time.gmtime())
@@ -1376,12 +2042,14 @@ if __name__ == "__main__":
 
     logging.getLogger(__name__)
 
-        # set up file and screen logging
+    logfile = 'kids_xmatch_cds_' + filename_timestamp + '.log'
+
+    # set up file and screen logging
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s.%(msecs)03d %(name)-12s %(module)s %(funcName)s %(lineno)d %(levelname)-8s %(message)s',
         datefmt='%y-%m-%dT%H:%M:%S',
-        filename='explore_kids_' + filename_timestamp + '.log',
+        filename=logfile,
         filemode='w')
 
     # define a Handler which writes INFO messages or higher to sys.stderr
@@ -1402,7 +2070,8 @@ if __name__ == "__main__":
     logging.info(__file__)
 
     logger = logging.getLogger(__name__)
-    logger.info('\n')
+
+    logger.info(f'Logfile created: {logfile}')
 
     t0 = time.time()
 
@@ -1413,7 +2082,8 @@ if __name__ == "__main__":
     from astroquery.utils.tap.core import TapPlus
 
     tap = TapPlus(url="https://tapvizier.cds.unistra.fr/TAPVizieR/tap")
-    job = tap.launch_job("SELECT column_name, unit, ucd FROM TAP_SCHEMA.columns "
+    job = tap.launch_job("SELECT column_name, unit, ucd "
+                     "FROM TAP_SCHEMA.columns "
                      "WHERE table_name = 'VII/289/dr16q' "
                      "AND (ucd LIKE 'pos.eq.ra%' OR ucd LIKE 'pos.eq.dec%')")
     print(job.get_results())
@@ -1470,7 +2140,6 @@ if __name__ == "__main__":
      # Dec≈+2.05°. The ratio of the raw value to those known coordinates gives you the exact
      # scale factor, and you can then hardcode it confidently in your cross-match query.
      # Sonnet 4.6
-
 
 
     sys.exit()
