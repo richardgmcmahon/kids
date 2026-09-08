@@ -912,6 +912,14 @@ def mk_webpage(table=None,
     return
 
 
+def xmatch_xmm_radec_check(
+        table=None,
+        colname_radec_xmm=['RA_src', 'DEC_src'],
+        colname_radec_ctp=['RA_ctp', 'DEC_ctp']):
+
+
+
+    return
 
 if __name__=='__main__':
 
@@ -958,10 +966,14 @@ if __name__=='__main__':
         filename = 'worst_LR_most_likely_neighbor.fits'
         path = './'
         infile = path + filename
-        print('Reading: {infile}')
+        print(f'Reading: {infile}')
         table = Table.read(infile)
         plotfile_prefix = filename
+        table.info()
         table.info(['attributes', 'stats'])
+        print(table[0])
+        print(table[-1])
+        input('Enter any key to continue... ')
 
         # create html webpage
         # colname_name='4XMM',
@@ -973,6 +985,13 @@ if __name__=='__main__':
         colname_dec='DEC_src'
         colname_ra_marker = 'RA_ctp'
         colname_dec_marker = 'DEC_ctp'
+
+        xmatch_xmm_radec_check(
+            table=table,
+            colname_radec_xmm=['RA_src', 'DEC_src'],
+            colname_radec_ctp=['RA_ctp', 'DEC_ctp'])
+
+
 
         colname_list=['mag', 'lr', 'd_ell', 'R_1SIG_MAJ', 'total_matches']
         mk_webpage(table=table,

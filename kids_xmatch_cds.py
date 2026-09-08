@@ -1,11 +1,20 @@
 """
 
+ESO Download Portal
+https://www.eso.org/qi/
+https://archive.eso.org/downloadportal/0b9bc5e8-9277-4398-bcaf-beba70063390
+
 https://kids.strw.leidenuniv.nl/overview.php
 
-https://cds-astro.github.io/tutorials/1_Intro_to_CDS_services_in_notebooks.html
+https://zenodo.org/records/14226117
 
 https://astroquery.readthedocs.io/en/latest/api/astroquery.xmatch.XMatchClass.html
 
+https://cds-astro.github.io/tutorials/1_Intro_to_CDS_services_in_notebooks.html
+
+https://tapvizier.cds.unistra.fr/adql/
+https://tapvizier.cds.unistra.fr/adql/help.html
+https://cds.unistra.fr/help/documentation/vizier-more/adql-vizier/
 
 https://docs.g-vo.org/adql/
 
@@ -25,6 +34,8 @@ from inspect import currentframe, getframeinfo
 import traceback
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Polygon
+
 import numpy as np
 
 # Astropy
@@ -41,7 +52,6 @@ import pyvo
 
 import fitsio
 from fitsio import FITS,FITSHDR
-
 
 
 DEBUG = False
@@ -62,20 +72,6 @@ cache=True, get_query_payload=False, **kwargs)
 
 """
 
-
-import logging
-
-
-import logging
-import sys
-
-
-import logging
-import sys
-
-
-import logging
-import sys
 
 
 def get_logger(name=__name__, level=logging.INFO, test=False):
@@ -167,16 +163,140 @@ def try_logger_v2():
     return logger
 
 
+def kids_make_tile_corners(radec_center=[180.0, 0.0],
+                      width=1.0,
+                      height=1.0,
+                      edgewidth=None):
+    """ Warning: probably will not work at poles and if a tile crosses over RA 24->0
+
+    The final calibrated, coadded images from the Astro-WISE pipeline have a
+    uniform pixel scale of 0.2 arcsec.
+
+    The r-band detection images, which result from a reduction using THELI,
+    specifically designed for optimal image shape measurement and small
+    astrometric reductions, are the basis of the multi-band catalogue.
+    They have a pixel scale that is closer to the native OmegaCAM pixel
+    size of 0.213”.
+
+    An example image has 21000 x 21000 pixels which at 0.2" per pixel is
+    4200" x 4200" which is 3600 + 600 or 300" (5') window edge
+    70' x 70'
+
+    0.2" per pixel = 5.555555e-5 degrees per pixel
+
+    see:
+
+    https://docs.astropy.org/en/stable/coordinates/matchsep.html
+
+    https://docs.astropy.org/en/stable/wcs/supported_projections.html
+
+    https://docs.astropy.org/en/latest/coordinates/angles.html#wrapping-and-bounds
+    https://docs.astropy.org/en/latest/coordinates/angles.html#longitude-and-latitude-objects
+
+    https://docs.astropy.org/en/latest/coordinates/angles.html#with-random-sampling
+
+    """
+
+    import math
+    import numpy
+
+    import astropy.units as u
+    from astropy.coordinates import SkyCoord
+    from astropy.coordinates import Angle
+
+    ncorners = 4
+    ra_corner = np.zeros(ncorners)
+    dec_corner = np.zeros(ncorners)
+
+    center = \
+        SkyCoord(radec_center[0]*u.deg, radec_center[1]*u.deg,
+                 frame='icrs')
+
+    dec_top = radec_center[1] + (height/2.0)
+    dec_bottom = radec_center[1] - (height/2.0)
+
+    # Corner order:
+    # Top Left (TL)
+    # Top Right (TR)
+    # Bottom Right BR)
+    # Bottom Left (BL)
+
+    cosdec_correction = (1.0/math.cos(math.radians(dec_top)))
+    print(dec_top, cosdec_correction)
+
+    ra_corner[0] = radec_center[0] - (cosdec_correction*width/2.0)
+    dec_corner[0] = dec_top
+
+    ra_corner[1] = radec_center[0] + (cosdec_correction*width/2.0)
+    dec_corner[1] = dec_top
+
+    cosdec_correction = (1.0/math.cos(math.radians(dec_bottom)))
+    print(dec_bottom, cosdec_correction)
+
+    # note order is + -> - to ensure clockwise
+    ra_corner[2] = radec_center[0] + (cosdec_correction*width/2.0)
+    dec_corner[2] = dec_bottom
+
+    ra_corner[3] = radec_center[0] - (cosdec_correction*width/2.0)
+    dec_corner[3] = dec_bottom
+
+
+    return ra_corner, dec_corner
+
+ra_corner, dec_corner = kids_make_tile_corners(
+    radec_center=[180.0, 0.0],
+    width=1.0,
+    height=1.0,
+    edgewidth=None)
+
+# Close the polygon by adding the first point at the end
+ra_plot = list(ra_corner) + [ra_corner[0]]
+dec_plot = list(dec_corner) + [dec_corner[0]]
+
+fig, ax = plt.subplots()
+
+filled_polygon = True
+ax.plot(ra_plot, dec_plot, 'r-', linewidth=2)
+if filled_polygon:
+    ax.fill(ra_plot, dec_plot, alpha=0.2)
+
+
+
+ra_corner, dec_corner = kids_make_tile_corners(
+    radec_center=[180.0, 60.0],
+    width=1.0,
+    height=1.0,
+    edgewidth=None)
+
+for i, (ra, dec) in enumerate(zip(ra_corner, dec_corner)):
+    print(f"Corner {i}: RA={ra}, Dec={dec}")
+
+ # Close the polygon by adding the first point at the end
+ra_plot = list(ra_corner) + [ra_corner[0]]
+dec_plot = list(dec_corner) + [dec_corner[0]]
+
+filled_polygon = True
+ax.plot(ra_plot, dec_plot, 'r-', linewidth=2)
+if filled_polygon:
+    ax.fill(ra_plot, dec_plot, alpha=0.2)
+
+ax.set_aspect('equal')
+
+plt.show()
+
+sys.exit()
+
+
 def tap_get_radec_limits(tap_service_name=None,
                          tap_table=None,
                          colnames_radec=['RAJ2000', 'DEJ2000']):
-    """Get the TAP RADec limits using a brute force
+    """Get the TAP RADec limits using brute force
 
     https://dp0-2.lsst.io/data-access-analysis-tools/adql-recipes.html
 
     See: https://kids.strw.leidenuniv.nl/overview.php
 
-    this is quite clumsy but just needs to run once and the results saved
+    this is quite clumsy but just needs to be run once and the results saved
     Each TAP query took three minutes!
 
     see: https://www.ivoa.net/documents/ADQL/20180112/PR-ADQL-2.1-20180112.html
@@ -206,6 +326,7 @@ def tap_get_radec_limits(tap_service_name=None,
     tap = pyvo.dal.TAPService(tap_service_name)
 
     # All
+    # note \" since CDS TAP needs "tablename"
     query0 = f"""
     SELECT
     -- KIDS All
@@ -359,6 +480,231 @@ def tap_get_radec_limits(tap_service_name=None,
     return
 
 
+def explore_kids_tile(tap_service_name=None,
+                      table_name="II/383/kids_dr5",
+                      tile_name='KIDS_150.1_2.2',
+                      ntop=None,
+                      tap_async_mode=False,
+                      test=False):
+    """
+    explore a single catalogue tile
+
+    """
+
+
+    return
+
+
+def tap_get_tile_list(tap_service_name=None,
+                      table_name="II/383/kids_dr5",
+                      ntop=None,
+                      colname='tile',
+                      tap_async_mode=False,
+                      test=False):
+    """
+    Note: async is a python reserved word since python 3.7
+    https://cdsarc.cds.unistra.fr/viz-bin/cat/II/383
+
+    tile example
+    KIDS_1.2_-35.1
+
+    """
+
+    import sqlparse
+
+    test = True
+    if test:
+        #ntop = 40
+        ntop = None
+        tap_async_mode = True
+        tap_async_mode = False
+
+    logger.info('')
+    logger.info(f'TAP service name: {tap_service_name}')
+    logger.info(f'TAP async: {tap_async_mode}')
+    print(f'Table: {table_name}')
+
+
+    if tap_service_name is None:
+        tap_service_name = "http://tapvizier.cds.unistra.fr/TAPVizieR/tap"
+        logger.info(f'TAP service name: {tap_service_name}')
+
+    service = pyvo.dal.TAPService(tap_service_name)
+
+    service.describe()
+    print(service.describe)
+
+    if table_name is None:
+        table_name = "II/383/kids_dr5"
+
+    # this fails since DISTINCT not supported by TAPVizier
+    query = f"""
+        SELECT DISTINCT {colname}
+            FROM \"{table_name};\"
+    """
+
+    if ntop is None:
+        query = \
+            f"""SELECT tile, COUNT(tile) AS NSources
+                FROM \"{table_name}\"
+                GROUP BY tile;"""
+
+    if ntop is not None:
+        query = \
+            f"""SELECT TOP {ntop}  tile, COUNT(tile) AS NSources
+                FROM \"{table_name}\"
+                GROUP BY tile;"""
+
+    radec_limits = True
+    print(f'ntop: {ntop}')
+    print(f'radec_limits: {radec_limits}')
+    if radec_limits:
+        # build query as a list of strings
+        query = ["SELECT "] # note the trailing space
+
+        if ntop is not None:
+            query.append(f"TOP {ntop} ")
+
+
+        #query.append(f"""
+        #    tile, COUNT(tile) AS NSources,
+        #    MIN(RAJ2000) AS RA_min, MAX(RAJ2000) AS RA_max,
+        #    MIN(DEJ2000) AS Dec_min, MAX(DEJ2000) AS Dec_max,
+        #    MIN(Xpos) AS Xpos_min, MAX(Xpos) AS Xpos_max,
+        #    MIN(Ypos) AS Ypos_min, MAX(Ypos) AS Ypos_max
+        #    FROM \"{table_name}\"
+        #    GROUP BY tile;""")
+
+        query.append(f"""
+            tile, COUNT(tile) AS NSources,
+            MIN(RAJ2000) AS RA_min, MAX(RAJ2000) AS RA_max,
+            MIN(DEJ2000) AS Dec_min, MAX(DEJ2000) AS Dec_max
+            FROM \"{table_name}\" """)
+
+        dec_limit = None
+        if dec_limit is not None:
+            query.append(f"WHERE DEJ2000 > -10.0 ")
+
+        query.append(f"GROUP BY tile;")
+
+
+        # create a single string query with line breaks from the list of strings
+        query = "\n".join(query)
+
+
+    """
+    ORDER BY tile;
+    """
+
+    print(f'Tap query: {query}')
+    print()
+
+    # create a human readable version of the sql command
+    pretty_query = \
+        sqlparse.format(query, reindent=True, keyword_case='upper')
+    print(pretty_query)
+    print()
+
+    query = pretty_query
+    t0 = time.time()
+
+    logger.info(f'tap_async_mode: {tap_async_mode}')
+    logger.info(f'execute the TAP query')
+    if not tap_async_mode:
+        result = service.search(query)
+
+    if tap_async_mode:
+        job = service.submit_job(query)
+        print(job.url)          # job URL on the server
+        print(job.phase)
+
+        job.run()
+        while job.phase not in ("COMPLETED", "ERROR", "ABORTED"):
+            elapsed = time.time() - t0
+            print(f'{job.phase} Elapsed time: {elapsed:.2f} seconds')
+            time.sleep(10)
+            job.raise_if_error()
+
+        job.wait(phases=["COMPLETED", "ERROR", "ABORTED"], timeout=3600)
+        job.raise_if_error()
+        result = job.fetch_result()
+
+
+    print('Elapsed time:', time.time() - t0, 'seconds')
+    num_rows = len(result)
+    print(f"Number of rows: {num_rows}")
+    nsources = result['NSources']
+    print(min(nsources), max(nsources))
+    print()
+
+    print('result: ', result)
+
+    nrows = len(result)
+    ra = np.zeros(nrows)
+    dec = np.zeros(nrows)
+    #nsources = np.zeros(nrows)
+
+    for i, row in enumerate(result):
+        radec = row[colname].split("_")
+        ra[i] = float(radec[1])
+        dec[i] = float(radec[2])
+        print(f'ra, dec: {i}, {ra[i]}, {dec[i]}')
+
+    tile_list = np.array(result[colname], dtype='U16')
+    table = Table(
+        [tile_list, ra, dec, nsources,
+         result['RA_min'], result['RA_max'],
+         result['Dec_min'], result['Dec_max']
+         ],
+        names=('Tile', 'RA', 'Dec', 'NSources',
+               'RA_min', 'RA_max',
+               'Dec_min', 'Dec_max'
+               )
+    )
+
+    """
+    result['Xpos_min'], result['Xpos_max'],
+    result['Ypos_min'], result['Ypos_max']
+    'Xpos_min', 'Xpos_max',
+    'Ypos_min', 'Ypos_max'
+    """
+
+    table.info(['stats', 'attributes'])
+
+    dec_unique = np.unique(table['Dec'])
+    print(dec_unique)
+
+
+    outfile = 'tmp.fits'
+    table.write(outfile, overwrite=True)
+
+    print('Elapsed time:', time.time() - t0, 'seconds')
+
+    xdata = table['RA']
+    ydata = table['Dec']
+
+    title = table_name
+    label = str(nrows)
+    plt.plot(xdata, ydata,
+             marker='+', linestyle='none',
+             label=label)
+    plt.legend()
+
+    plt.title(title)
+    plt.xlabel('RA')
+    plt.ylabel('Dec')
+
+    saveplot=True
+    plotfile = 'radec.png'
+    if saveplot:
+        print('Saving:', plotfile)
+        plt.savefig(plotfile)
+
+    plt.show()
+
+    sys.exit()
+
+    return
 
 
 
@@ -1346,6 +1692,7 @@ def get_table_lists(DEBUG=False):
                        'I/359/vhs_dr4', # 12 VHS dR4
                        'I/355/gaiadr3'] # 13 Gaia DR3
 
+    # by hand from count queries
     table_count_rows = [1021800, # 0
                         407806,  # 1
                         656997,  # 2
@@ -2011,6 +2358,23 @@ if __name__ == "__main__":
 
     import fits_sql_history
     #help(fits_sql_history)
+
+    logger = get_logger()
+    logger.info('')
+    logger.info(f"Command: {' '.join(sys.argv)}")
+    logger.info(f"Script: {sys.argv[0]}")
+    logger.info(f"Arguments: {sys.argv[1:]}")
+
+    # Connect to VizieR TAP service
+    print(f'Use pyvo.dal.TAPService')
+    tap_service = \
+        pyvo.dal.TAPService("http://tapvizier.cds.unistra.fr/TAPVizieR/tap")
+
+
+    tap_get_tile_list(tap_service_name=None,
+                      table_name='II/383/kids_dr5',
+                      colname='Tile')
+
 
     # test
     TEST = True
